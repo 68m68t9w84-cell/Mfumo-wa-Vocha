@@ -1,0 +1,105 @@
+const state = {
+  selectedPackageId: null,
+  packages: [],
+};
+
+const packageListEl = document.getElementById('packageList');
+const purchaseFormEl = document.getElementById('purchaseForm');
+const statusBoxEl = document.getElementById('statusBox');
+
+async function loadPackages() {
+  try {
+    const response = await fetch('/api/packages');
+    const result = await response.json();
+
+    if (!result.success) {
+      throw new Error(result.message || 'Failed to load packages');
+    }
+
+    state.packages = result.data;
+
+    if (!state.packages.length) {
+      packageListEl.innerHTML = '<p class="empty-state">Hakuna vifurushi vya intaneti vilivyojaza.</p>';
+      return;
+    }
+
+    const first = state.packages[0];
+    state.selectedPackageId = first.id;
+
+    packageListEl.innerHTML = state.packages
+      .map((pkg) => `
+        <div class="package-card ${pkg.id === state.selectedPackageId ? 'selected' : ''}" data-id="${pkg.id}">
+          <div>
+            <div class="package-name">${pkg.name}</div>
+            <div class="package-meta">${pkg.data_amount_mb / 1024} GB • ${pkg.duration_days ? `${pkg.duration_days} days` : `${pkg.duration_hours} hours`}</div>
+          </div>
+          <div class="package-price">TSh ${Number(pkg.price_tzs).toLocaleString()}</div>
+        </div>
+      `)
+      .join('');
+
+    packageListEl.querySelectorAll('.package-card').forEach((card) => {
+      card.addEventListener('click', () => {
+        state.selectedPackageId = Number(card.dataset.id);
+        document.querySelectorAll('.package-card').forEach((c) => c.classList.toggle('selected', Number(c.dataset.id) === state.selectedPackageId));
+      });
+    });
+  } catch (error) {
+    packageListEl.innerHTML = `<p class="empty-state">${error.message}</p>`;
+  }
+}
+
+purchaseFormEl.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const phone = document.getElementById('phone').value.trim();
+  const network = document.getElementById('network').value;
+  const macAddress = document.getElementById('macAddress').value.trim();
+
+  if (!state.selectedPackageId) {
+    showStatus('Tafadhali chagua kifurushi.', true);
+    return;
+  }
+
+  if (!phone || !network) {
+    showStatus('Tafadhali jaza namba ya simu na mtandao.', true);
+    return;
+  }
+
+  const buyButton = document.getElementById('buyButton');
+  buyButton.disabled = true;
+  buyButton.textContent = 'Inatuma ombi la malipo...';
+
+  try {
+    const response = await fetch('/api/payments/initiate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        packageId: state.selectedPackageId,
+        phone,
+        network,
+        macAddress,
+      }),
+    });
+
+    const result = await response.json();
+    if (!result.success) {
+      throw new Error(result.message || 'Payment request failed');
+    }
+
+    showStatus(`Ombi la malipo limeundwa kwa mafanikio. Kifurushi: ${result.data.package.name}. <br />Namba ya taarifa: ${result.data.reference}. <br />Hali: ${result.data.status}.`);
+    purchaseFormEl.reset();
+  } catch (error) {
+    showStatus(error.message, true);
+  } finally {
+    buyButton.disabled = false;
+    buyButton.textContent = 'Lipa & Kuanza Internet';
+  }
+});
+
+function showStatus(message, isError = false) {
+  statusBoxEl.classList.remove('hidden', 'error');
+  if (isError) statusBoxEl.classList.add('error');
+  statusBoxEl.innerHTML = message;
+}
+
+loadPackages();
